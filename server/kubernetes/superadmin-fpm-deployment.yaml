@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: superadmin-fpm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: superadmin-fpm
+  template:
+    metadata:
+      labels:
+        app: superadmin-fpm
+    spec:
+      imagePullSecrets:
+        - name: secret-registry
+      containers:
+        - name: superadmin-fpm
+          image: 834033184010.dkr.ecr.ap-southeast-2.amazonaws.com/agentcis-superadmin-fpm:latest
+          imagePullPolicy: Always
+          volumeMounts:
+            - mountPath: /data/storage
+              name: superadmin-volume
+      volumes:
+        - name: superadmin-volume
+          hostPath:
+            path: /data
+            type: DirectoryOrCreate

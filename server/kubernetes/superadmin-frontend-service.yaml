@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: superadmin-frontend
+spec:
+  selector:
+    app: superadmin-frontend
+  ports:
+    - port: 80
+      targetPort: 80
+      protocol: TCP
+  type: LoadBalancer

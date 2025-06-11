@@ -1,0 +1,45 @@
+version: "3.9"
+services:
+    nginx:
+        container_name: superadmin-nginx
+        build:
+            context: ./.docker/webserver
+            dockerfile: Dockerfile
+        restart: on-failure
+        depends_on:
+            - php
+        ports:
+            - "81:81"
+        tty: true
+        networks:
+            - agentcis
+        volumes:
+            - .docker/storage/logs/nginx/:/var/log/nginx
+            - .:/var/www/superadmin/
+    php:
+        build:
+            context: .docker/php
+            dockerfile: Dockerfile
+        container_name: superadminphp
+        volumes:
+            - ./:/var/www/superadmin
+        networks:
+            - agentcis
+#    superadminmysql:
+#        image: mysql:5.7
+#        container_name: superadminmysql
+#        ports:
+#            - "3306:3306"
+#        networks:
+#            - agentcis
+#        tty: true
+#        environment:
+#            - MYSQL_DATABASE=superadmin
+#            - MYSQL_USER=superadmin
+#            - MYSQL_PASSWORD=root
+#            - MYSQL_ROOT_PASSWORD=root
+#        volumes:
+#            - .docker/storage/data/mysql:/var/lib/mysql
+networks:
+    agentcis:
+        name: agentcis

@@ -1,0 +1,44 @@
+FROM php:7.4-alpine AS composer_base
+RUN mkdir -p /superadmin
+
+WORKDIR /superadmin
+
+RUN apk --update add --no-cache --update \
+        vim \
+        bash \
+        curl \
+        libzip-dev \
+        libpng-dev \
+        libxml2-dev \
+        zip \
+        unzip \
+        fontconfig
+
+RUN docker-php-ext-install pdo_mysql exif pcntl bcmath gd  zip xml dom
+
+RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer; \
+    chmod +x /usr/local/bin/composer; \
+    rm -rf /var/cache/apk/*;
+
+RUN composer self-update --2
+
+RUN addgroup -S composer \
+    && adduser -S composer -G composer \
+    && chown -R composer /superadmin
+
+USER composer
+
+COPY --chown=composer composer.json composer.lock ./
+
+RUN composer install --no-dev --no-scripts --no-autoloader --prefer-dist
+
+COPY --chown=composer . .
+RUN composer update --no-dev --prefer-dist
+
+
+FROM nginx:stable-alpine AS superadmin_webserver
+WORKDIR /superadmin
+
+COPY nginx.conf.template /etc/nginx/templates/default.conf.template
+
+COPY --from=composer_base /superadmin/public /superadmin/public

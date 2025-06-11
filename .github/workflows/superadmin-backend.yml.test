@@ -1,0 +1,78 @@
+name: Staging Superadmin Backend CI/CD
+on:
+  push:
+    branches:
+      - 'alija-backend-k8s'
+
+
+env:
+  RED_COLOR_MESSAGE: "\e[31m"
+  GREEN_COLOR_MESSAGE: "\e[32m"
+  YELLOW_COLOR_MESSAGE: "\e[33m"
+  RESET_COLOR_MESSAGE: "\e[0m"
+  FRONT_REPOSITORY: "alija-backend-k8s" # ECR Repository
+
+
+jobs:
+  Deploy:  
+    name: Deploying to Staging
+    runs-on: ubuntu-latest  
+    environment: Staging
+    steps:  
+        - name: Checkout
+          uses: actions/checkout@v2    
+          
+        - name: Setup AWS ECR Details
+          uses: aws-actions/configure-aws-credentials@v1
+          with:
+            aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+            aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+            aws-region: ${{ vars.AWS_REGION }}
+
+
+        - name: Login to Amazon ECR
+          id: login-pf-aws-ecr
+          uses: aws-actions/amazon-ecr-login@v1
+          
+
+        - name: Variable initialization
+          run: |
+            TAG="$(date +'%m-%d')-$(git rev-parse --short HEAD)"
+            echo "Image tag = ${TAG}"
+            ECR_REGISTRY=${{ steps.login-pf-aws-ecr.outputs.registry }}
+            ECR_REPOSITORY=${{ env.FRONT_REPOSITORY }}
+
+            echo "IMAGE_TAG=superadmin-backend-${TAG}" >> $GITHUB_ENV
+            echo "REGISTRY=${ECR_REGISTRY}" >> $GITHUB_ENV
+            echo "REPOSITORY=${ECR_REPOSITORY}" >> $GITHUB_ENV
+
+        - name: Checking variables value
+          run: |
+            echo "Image tag :${{ env.GREEN_COLOR_MESSAGE }} ${{ env.IMAGE_TAG }} ${{ env.RESET_COLOR_MESSAGE }} "
+            echo "Registery : ${{ env.GREEN_COLOR_MESSAGE }} ${{ env.REPOSITORY }} ${{ env.RESET_COLOR_MESSAGE }}"
+
+
+        - name: Build and push Docker image to Amazon ECR
+          working-directory: ./server
+          run: |
+            echo "${{ env.GREEN_COLOR_MESSAGE }} Building docker images ${{ env.RESET_COLOR_MESSAGE }}"
+            docker build -t $REGISTRY/$REPOSITORY:$IMAGE_TAG .
+
+            echo "${{ env.GREEN_COLOR_MESSAGE }} Pushing docker images ${{ env.RESET_COLOR_MESSAGE }}"
+            docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
+
+        - name: Post process to system
+          uses: appleboy/ssh-action@v0.1.10 
+          with:
+            host: ${{ vars.SSH_HOSTNAME }}
+            username: ${{ vars.SSH_USERNAME }}
+            key: ${{ secrets.K8S_SSH_PRIVATE_KEY }}
+            port: ${{ vars.SSH_PORT }}
+            command_timeout: 30m
+            script: |
+              echo "Deploying pod in k8s
+              SERVER : ${{ env.RED_COLOR_MESSAGE }} $HOSTNAME ${{ env.RESET_COLOR_MESSAGE }} "
+              echo "${{ env.GREEN_COLOR_MESSAGE }} Deploying latest pod in k8s  ${{ env.RESET_COLOR_MESSAGE }}"
+
+              cd "${{ vars.MANIFEST_DIR }}"
+              sed -i "s|image:.*|image: ${{ env.REGISTRY }}/${{ env.REPOSITORY }}:${{ env.IMAGE_TAG }}|" hpa-superadmin-backend.yml

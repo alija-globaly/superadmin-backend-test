@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: superadmin-nginx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: superadmin-nginx
+  template:
+    metadata:
+      labels:
+        app: superadmin-nginx
+    spec:
+      imagePullSecrets:
+        - name: secret-registry
+      containers:
+        - name: superadmin-nginx
+          image: 834033184010.dkr.ecr.ap-southeast-2.amazonaws.com/agentcis-superadmin-nginx:latest
+          imagePullPolicy: Always
+          env:
+            - name: FPM_HOST
+              value: "superadmin-fpm-service.default:9000"

@@ -1,0 +1,57 @@
+name: Push the Backend Docker image to AWS ECR Repo
+
+on: 
+  push: 
+    branches: [ "main" ]
+
+env:
+  GREEN_COLOR_MESSAGE: "\e[32m"
+  RED_COLOR_MESSAGE: "\e[31m"
+  RESET_COLOR_MESSAGE: "\e[0m"
+  ECR_REPOSITORY: alija-backend-test
+          
+
+jobs:
+  Build:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    environment: Staging
+    steps:
+
+      - name: Checkout Code
+        uses: actions/checkout@v2
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Generate Dynamic Image Tag
+        id: set-tag
+        run: echo "tag=$(date +%Y-%m-%d-%H%M%S)" >> $GITHUB_OUTPUT
+
+      - name: Build and Push Docker Image
+        working-directory: ./server
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ steps.set-tag.outputs.tag }}
+        run: |
+          echo -e "${{ env.GREEN_COLOR_MESSAGE }} Building Docker image...${{ env.RESET_COLOR_MESSAGE }}"
+          if ! docker build -t $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG .; then
+            echo -e "${RED_COLOR_MESSAGE}❌ Docker build failed!${RESET_COLOR_MESSAGE}"
+            exit 1
+          fi
+
+          echo -e "${{ env.GREEN_COLOR_MESSAGE }} Tagging Docker image...${{ env.RESET_COLOR_MESSAGE }}"
+          docker tag $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG
+
+          echo -e "${{ env.GREEN_COLOR_MESSAGE }} Pushing Docker image to ECR...${{ env.RESET_COLOR_MESSAGE }}"
+          docker push $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG
+
+

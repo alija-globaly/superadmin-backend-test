@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: superadmin-fpm-service
+spec:
+  selector:
+    app: superadmin-fpm
+  ports:
+    - port: 9000
+      targetPort: 9000
+      protocol: TCP
+  type: ClusterIP

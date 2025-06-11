@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: superadmin-backend
+  namespace: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: superadmin-backend
+  template:
+    metadata:
+      labels:
+        app: superadmin-backend
+    spec:
+      imagePullSecrets:
+        - name: ecr-registry-secret
+      containers:
+        - name: superadmin-backend  
+          image: 834033184010.dkr.ecr.ap-southeast-2.amazonaws.com/alija-backend-k8s:05-15-b64c9c9
+          ports:
+            - containerPort: 85
+          imagePullPolicy: Always
+            
+          volumeMounts:
+            - mountPath: /data/storagebackend
+              name: superadmin-volume
+      volumes:
+        - name: superadmin-volume
+          persistentVolumeClaim:
+            claimName: uploads-pvc
+

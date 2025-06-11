@@ -1,0 +1,258 @@
+name: Production CI/CD to build and push frontend and backend
+on:
+  push:
+    branches:
+      - frontend
+      - backend
+
+  pull_request:
+    types: [closed]
+    branches:
+      - frontend
+      - backend
+
+env:
+  BACKEND_CONDN: "(github.event_name == 'push' && github.ref == 'refs/heads/backend') || (github.event_name == 'pull_request' && github.event.pull_request.merged == true && github.ref == 'refs/heads/backend')"
+  FRONTEND_CONDN: "(github.event_name == 'push' && github.ref == 'refs/heads/frontend') || (github.event_name == 'pull_request' && github.event.pull_request.merged == true && github.ref == 'refs/heads/frontend')"
+
+  FRONTEND_WRK_DIR: "client/"
+  FRONTEND_SRC_DIR: "client/dist/*"
+  FRONTEND_TMP_DST_DIR: "~/temp-test/"
+  FRONTEND_FINAL_DIR: "~/app/superadmin-app/frontend/"
+
+  BACKEND_WRK_DIR: "server/"
+  BACKEND_SRC_DIR: "server/*"
+  BACKEND_TMP_DST_DIR: "~/temp-test/"
+  BACKEND_FINAL_DIR: "~/app/superadmin-app/backend/"
+
+  BACKUP_DIR: "~/superadmin-backup/"
+  ENV_BACKUP_DIR: "~/env-backup/.env"
+
+jobs:
+  back-install-and-build:
+    if: |
+        (github.event_name == 'push' && github.ref == 'refs/heads/backend') 
+        || 
+        (github.event_name == 'pull_request' && github.event.pull_request.merged == true && github.ref == 'refs/heads/backend')
+    name: Backend Install and Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    strategy:
+      matrix:
+        php-version: [7.4]
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+      
+      - name: Setup PHP with PECL extension
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php-version }}
+  
+      # - name: Copy .env
+      #   working-directory: ${{ env.BACKEND_WRK_DIR }}
+      #   run: cp .env.example .env
+
+      - name: Install package using Composer
+        working-directory: ${{ env.BACKEND_WRK_DIR }}
+        run: |
+          composer --version
+          composer install --quiet --no-scripts --no-interaction --prefer-dist
+          #composer install -q --no-ansi --no-interaction --no-scripts --no-progress --prefer-dist
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          #name: backend-artifact__${{ github.sha }}
+          name: backend-artifact-${{ github.sha }}
+          path: "${{ env.BACKEND_WRK_DIR }}"
+          if-no-files-found: warn
+          compression-level: 6
+          overwrite: false
+
+      - name: Copy Backend source code
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOSTNAME }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRV_KEY }}
+          port: ${{ secrets.SSH_PORT }}
+          command_timeout: 30m
+          source: ${{ env.BACKEND_SRC_DIR }}
+          target: ${{ env.BACKEND_TMP_DST_DIR }}
+ 
+  front-install-and-build:
+    if: |
+            (github.event_name == 'push' && github.ref == 'refs/heads/frontend') 
+            || 
+            (github.event_name == 'pull_request' && github.event.pull_request.merged == true && github.ref == 'refs/heads/frontend') 
+    name: Frontend Install and Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    strategy:
+      matrix:
+        node-version: [14.x]
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Node.js Setup
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: npm install
+        working-directory: ${{ env.FRONTEND_WRK_DIR }}
+        run: |
+          cp .env.production .env
+          npm install
+          #vue-cli-service build
+          npm run build
+          ls -al
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-artifact__${{ github.sha }}
+          path: "${{ env.FRONTEND_WRK_DIR }}/dist"
+          if-no-files-found: warn
+          compression-level: 6
+          overwrite: false
+
+      - name: Copy Frontend source code 
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOSTNAME }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRV_KEY }}
+          port: ${{ secrets.SSH_PORT }}
+          command_timeout: 30m
+          source: ${{ env.FRONTEND_SRC_DIR }}
+          target: ${{ env.FRONTEND_TMP_DST_DIR }}
+
+  Deploying-Code:
+    name: Deploying the code
+    runs-on: ubuntu-latest
+    needs: 
+      - back-install-and-build
+      - front-install-and-build
+    if: |
+      always() &&
+      (needs.back-install-and-build.result == 'success' || needs.front-install-and-build.result == 'success') &&
+      !(needs.back-install-and-build.result == 'failure' && needs.front-install-and-build.result == 'skipped') &&
+      !(needs.front-install-and-build.result == 'failure' && needs.back-install-and-build.result == 'skipped')
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+      
+      - name: Deploy Backend
+        if: |
+          (github.event_name == 'push' && github.ref == 'refs/heads/backend') 
+          || 
+          (github.event_name == 'pull_request' && github.event.pull_request.merged == true && github.ref == 'refs/heads/backend')
+        uses: appleboy/ssh-action@v0.1.10
+        with:
+          host: ${{ secrets.SSH_HOSTNAME }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRV_KEY }}
+          port: ${{ secrets.SSH_PORT }}
+          command_timeout: 30m
+          script: |
+            echo "Deploying Frontend and Testing on: $HOSTNAME server"
+            echo "Creating Directory"
+            mkdir -p  ${{ env.BACKEND_FINAL_DIR }} || exit 1
+            mkdir -p ${{ env.BACKUP_DIR }}/backend__$(date +'%Y-%m-%d')___${{ github.sha }} || exit 1
+
+            echo "Copying and deploying code, please wait ..."
+            cp -r ${{ env.BACKEND_TMP_DST_DIR }}/${{ env.BACKEND_SRC_DIR }} ${{ env.BACKEND_FINAL_DIR }} || exit 1
+            cp -r ${{ env.BACKEND_TMP_DST_DIR }}/${{ env.BACKEND_SRC_DIR }} ${{ env.BACKUP_DIR }}/backend__$(date +'%Y-%m-%d')___${{ github.sha }} || exit 1
+            cp -r  ${{ env.ENV_BACKUP_DIR }} ${{ env.BACKEND_FINAL_DIR }} || exit 1
+
+            echo "fixing permission"
+            cd ${{ env.BACKEND_FINAL_DIR }}
+            sudo chmod -R 777 bootstrap/
+            sudo chmod -R 777 storage/
+            cd $HOME
+
+            echo "Restarting service!!!"
+            sudo service php7.4-fpm restart
+            if ! sudo systemctl is-active --quiet php7.4-fpm; then
+              #displyaing_in_red
+              echo -e "\e[31mWARNING: php7.4-fpm is not running properly after restart!\e[0m"
+              echo "php7.4-fpm status:"
+              sudo systemctl status php7.4-fpm
+              exit 1
+            else
+              #displyaing_in_green
+              echo -e "\e[32mphp7.4-fpm restarted successfully and is running.\e[0m"
+            fi  
+
+            sudo systemctl restart nginx
+            if ! sudo systemctl is-active --quiet nginx; then
+              #displyaing_in_red
+              echo -e "\e[31mWARNING: Nginx is not running properly after restart!\e[0m"
+              echo "Nginx status:"
+              sudo systemctl status nginx
+              exit 1
+            else
+              #displyaing_in_green
+              echo -e "\e[32mNginx restarted successfully and is running.\e[0m"
+            fi   
+
+            sudo systemctl restart supervisor
+            if ! sudo systemctl is-active --quiet supervisor; then
+              #displyaing_in_red
+              echo -e "\e[31mWARNING: supervisor is not running properly after restart!\e[0m"
+              echo "supervisor status:"
+              sudo systemctl status supervisor
+              exit 1
+            else
+              #displyaing_in_green
+              echo -e "\e[32msupervisor restarted successfully and is running.\e[0m"
+            fi 
+
+            echo "Removing Backend temporary files!!!"
+            rm -rf ${{ env.BACKEND_TMP_DST_DIR }}/*  || exit 1
+
+      - name: Deploy Frontend
+        if: |
+            (github.event_name == 'push' && github.ref == 'refs/heads/frontend') 
+            || 
+            (github.event_name == 'pull_request' && github.event.pull_request.merged == true && github.ref == 'refs/heads/frontend')
+        uses: appleboy/ssh-action@v0.1.10
+        with:
+          host: ${{ secrets.SSH_HOSTNAME }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRV_KEY }}
+          port: ${{ secrets.SSH_PORT }}
+          command_timeout: 30m
+          script: |
+            echo "Deploying Frontend and Testing on: $HOSTNAME server"
+            echo "Creating Directory"            
+            mkdir -p ${{ env.FRONTEND_FINAL_DIR }} || exit 1
+            mkdir -p ${{ env.BACKUP_DIR }}/frontend__$(date +'%Y-%m-%d')___${{ github.sha }} || exit 1
+
+            echo "Copying and deploying code, please wait ...."          
+            cp -r ${{ env.FRONTEND_TMP_DST_DIR }}/${{ env.FRONTEND_SRC_DIR }} ${{ env.FRONTEND_FINAL_DIR }} || exit 1
+            cp -r ${{ env.FRONTEND_TMP_DST_DIR }}/${{ env.FRONTEND_SRC_DIR }} ${{ env.BACKUP_DIR }}/frontend__$(date +'%Y-%m-%d')___${{ github.sha }} || exit 1
+
+            sudo systemctl restart nginx
+            if ! sudo systemctl is-active --quiet nginx; then
+              #displyaing_in_red
+              echo -e "\e[31mWARNING: Nginx is not running properly after restart!\e[0m"
+              echo "Nginx status:"
+              sudo systemctl status nginx
+              exit 1
+            else
+              #displyaing_in_green
+              echo -e "\e[32mNginx restarted successfully and is running.\e[0m"
+            fi   
+                       
+            echo "Removing Frontend temporary files!!!"
+            rm -rf ${{ env.FRONTEND_TMP_DST_DIR }}/* || exit 1
